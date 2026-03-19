@@ -1,5 +1,7 @@
 from django.db import models
 
+from myproject.storage_backends import MediaStorage
+
 class Product(models.Model):
     # Categories as Enum choices
     ELECTRONICS = 'electronics'
@@ -34,7 +36,7 @@ class Product(models.Model):
 # Product images: multiple and required
 class ProductImage(models.Model):
     product = models.ForeignKey(Product, related_name='images', on_delete=models.CASCADE)
-    image = models.ImageField(upload_to='products/images/')
+    image = models.ImageField(upload_to='products/images/', storage=MediaStorage())
 
     def __str__(self):
         return f"Image for {self.product.name}"
