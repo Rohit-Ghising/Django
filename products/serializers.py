@@ -26,8 +26,19 @@ class ProductSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'description', 'shortdescription', 'brand', 'stock',
             'price', 'discount_price', 'category', 'stars', 'created_at',
-            'images', 'specs', 'tags'
+            'images', 'specs', 'tags', 'rating', 'review_count', 'featured', 'trending', 'is_new'
         ]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if data.get('category') == Product.ELECTRONICS:
+            data['category'] = Product.PHONES
+        return data
+
+    def validate_category(self, value):
+        if value == Product.ELECTRONICS:
+            return Product.PHONES
+        return value
 
     def create(self, validated_data):
         specs_data = validated_data.pop('specs', [])
@@ -43,6 +54,8 @@ class ProductSerializer(serializers.ModelSerializer):
             Tag.objects.create(product=product, **tag)
 
         return product
+
+
 
     def update(self, instance, validated_data):
         for attr, value in validated_data.items():

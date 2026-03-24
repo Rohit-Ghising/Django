@@ -30,3 +30,16 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError("Invalid email or password")
         data['user'] = user
         return data
+
+
+class UserSerializer(serializers.ModelSerializer):
+    name = serializers.CharField(source='first_name')
+    role = serializers.SerializerMethodField()
+    createdAt = serializers.DateTimeField(source='date_joined')
+
+    class Meta:
+        model = User
+        fields = ['id', 'email', 'name', 'role', 'createdAt']
+
+    def get_role(self, obj):
+        return 'admin' if obj.is_staff or obj.is_superuser else 'user'

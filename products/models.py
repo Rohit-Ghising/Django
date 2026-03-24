@@ -1,9 +1,12 @@
 from django.db import models
 
-from myproject.storage_backends import MediaStorage
-
 class Product(models.Model):
     # Categories as Enum choices
+    PHONES = 'phones'
+    LAPTOPS = 'laptops'
+    HEADPHONES = 'headphones'
+    SMARTWATCHES = 'smartwatches'
+    ACCESSORIES = 'accessories'
     ELECTRONICS = 'electronics'
     FASHION = 'fashion'
     BOOKS = 'books'
@@ -11,7 +14,11 @@ class Product(models.Model):
     TOYS = 'toys'
     
     CATEGORY_CHOICES = [
-        (ELECTRONICS, 'Electronics'),
+        (PHONES, 'Phones'),
+        (LAPTOPS, 'Laptops'),
+        (HEADPHONES, 'Headphones'),
+        (SMARTWATCHES, 'Smartwatches'),
+        (ACCESSORIES, 'Accessories'),
         (FASHION, 'Fashion'),
         (BOOKS, 'Books'),
         (HOME, 'Home'),
@@ -27,6 +34,11 @@ class Product(models.Model):
     discount_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)  # optional
     category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)  # required
     stars = models.CharField(max_length=5, null=True, blank=True)  # optional
+    rating = models.DecimalField(max_digits=2, decimal_places=1, default=4.5)
+    review_count = models.PositiveIntegerField(default=0)
+    featured = models.BooleanField(default=False)
+    trending = models.BooleanField(default=False)
+    is_new = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
@@ -36,7 +48,7 @@ class Product(models.Model):
 # Product images: multiple and required
 class ProductImage(models.Model):
     product = models.ForeignKey(Product, related_name='images', on_delete=models.CASCADE)
-    image = models.ImageField(upload_to='products/images/', storage=MediaStorage())
+    image = models.URLField(max_length=1024)
 
     def __str__(self):
         return f"Image for {self.product.name}"
