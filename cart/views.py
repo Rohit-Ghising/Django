@@ -1,12 +1,54 @@
+import base64
+import hashlib
+import hmac
+from decimal import Decimal
+from uuid import uuid4
+
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status
+from django.conf import settings
 from .models import Cart, CartItem
 from .serializers import CartSerializer, AddCartItemSerializer, UpdateCartItemSerializer
 from products.models import Product
-from orders.models import Order, OrderItem
-from orders.serializers import OrderSerializer
+from orders.models import Order, OrderItem, Payment
+from orders.serializers import OrderSerializer, PaymentSerializer
+
+
+def build_frontend_redirect(path: str) -> str:
+    base_url = settings.ESEWA_FRONTEND_BASE_URL.rstrip('/')
+    if not base_url:
+        return path
+    if path.startswith('/'):
+        return f'{base_url}{path}'
+    return f'{base_url}/{path}'
+
+
+def build_esewa_redirect_url(status_value: str, transaction_uuid: str) -> str:
+    base_redirect = (
+        settings.ESEWA_SUCCESS_REDIRECT if status_value == 'success' else settings.ESEWA_FAILURE_REDIRECT
+    )
+    fallback_path = f'/checkout?payment=esewa_{status_value}&payment_uuid={transaction_uuid}'
+    base_url = base_redirect or build_frontend_redirect(fallback_path)
+    separator = '&' if '?' in base_url else '?'
+    if 'payment_uuid=' in base_url:
+        return base_url
+    if 'payment=' in base_url or 'esewa_status=' in base_url:
+        return f'{base_url}{separator}payment_uuid={transaction_uuid}'
+    status_key = 'payment'
+    status_field = f'esewa_{status_value}'
+    return f'{base_url}{separator}{status_key}={status_field}&payment_uuid={transaction_uuid}'
+
+
+def generate_esewa_signature(total_amount: Decimal, transaction_uuid: str, product_code: str) -> str:
+    message = f"total_amount={total_amount},transaction_uuid={transaction_uuid},product_code={product_code}"
+    digest = hmac.new(
+        settings.ESEWA_SECRET_KEY.encode('utf-8'),
+        message.encode('utf-8'),
+        hashlib.sha256,
+    ).digest()
+    return base64.b64encode(digest).decode('utf-8')
 
 # Get or create active cart for user
 def get_user_cart(user):
@@ -63,12 +105,17 @@ def checkout_cart(request):
     if not cart.items.exists():
         return Response({'error': 'Cart is empty'}, status=status.HTTP_400_BAD_REQUEST)
     cart_items = list(cart.items.select_related('product'))
-    order_total = sum(item.total_price for item in cart_items)
+    order_total = sum(Decimal(item.total_price) for item in cart_items)
+    order_total = order_total.quantize(Decimal('0.01'))
+    shipping_fee = Decimal('0.00') if order_total > Decimal('99.00') else Decimal('9.99')
+    tax_amount = (order_total * Decimal('0.08')).quantize(Decimal('0.01'))
+    total_amount = (order_total + shipping_fee + tax_amount).quantize(Decimal('0.01'))
+
     order = Order.objects.create(
         user=request.user,
         cart_id=cart.id,
         total_price=order_total,
-        status=Order.STATUS_COMPLETED,
+        status=Order.STATUS_PENDING,
     )
 
     order_items = []
@@ -86,11 +133,45 @@ def checkout_cart(request):
     cart.is_ordered = True
     cart.save()
     new_cart = get_user_cart(request.user)
+    payment = Payment.objects.create(
+        order=order,
+        method=Payment.METHOD_ESEWA,
+        transaction_uuid=uuid4().hex,
+        amount=order_total,
+        tax_amount=tax_amount,
+        shipping_amount=shipping_fee,
+        total_amount=total_amount,
+    )
+
+    signed_field_names = "total_amount,transaction_uuid,product_code"
+    signature = generate_esewa_signature(
+        total_amount=total_amount,
+        transaction_uuid=payment.transaction_uuid,
+        product_code=settings.ESEWA_MERCHANT_ID,
+    )
+    esewa_payload = {
+        "payment_url": settings.ESEWA_PAYMENT_URL,
+        "product_code": settings.ESEWA_MERCHANT_ID,
+        "amount": str(order_total),
+        "tax_amount": str(tax_amount),
+        "total_amount": str(total_amount),
+        "transaction_uuid": payment.transaction_uuid,
+        "product_service_charge": "0",
+        "product_delivery_charge": str(shipping_fee),
+        "success_url": build_esewa_redirect_url('success', payment.transaction_uuid),
+        "failure_url": build_esewa_redirect_url('failure', payment.transaction_uuid),
+        "signed_field_names": signed_field_names,
+        "signature": signature,
+    }
+
     cart_serializer = CartSerializer(new_cart)
     order_serializer = OrderSerializer(order)
+    payment_serializer = PaymentSerializer(payment)
     return Response({
         'message': 'Checkout complete',
         'order': order_serializer.data,
+        'payment': payment_serializer.data,
+        'esewa': esewa_payload,
         'cart': cart_serializer.data,
     })
 
