@@ -12,17 +12,17 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from django.core.files.storage import default_storage
 
 from .models import Product, ProductImage, Tag
 from .permissions import IsSuperUser
 from .serializers import ProductSerializer
-from myproject.storage_backends import MediaStorage
 
 DEFAULT_PRODUCT_IMAGE = "https://images.unsplash.com/photo-1510557880182-3d4d3cba35a5?w=800&q=80"
-storage = MediaStorage()
+storage = default_storage
 
 
-def _save_file_to_s3(uploaded_file):
+def _save_uploaded_file(uploaded_file):
     extension = Path(uploaded_file.name).suffix or ".jpg"
     filename = f"products/{uuid.uuid4().hex}{extension}"
     stored_path = storage.save(filename, uploaded_file)
@@ -38,7 +38,7 @@ def _extract_uploaded_files(request):
 
 def _attach_uploaded_images(product, uploads):
     for upload in uploads:
-        ProductImage.objects.create(product=product, image=_save_file_to_s3(upload))
+        ProductImage.objects.create(product=product, image=_save_uploaded_file(upload))
 
 
 def _attach_tags(product, raw_tags):
